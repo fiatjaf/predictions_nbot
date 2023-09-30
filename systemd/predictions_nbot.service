@@ -1,0 +1,11 @@
+[Unit]
+Description=predictions_nbot
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/path/to/executable/predictions_nbot
+Environment=SECRET_KEY=
+
+[Install]
+WantedBy=default.target
