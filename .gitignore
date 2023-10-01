@@ -1,4 +1,2 @@
 *.env
-relay-*.txt
-event-*.json
-*.ots
+data

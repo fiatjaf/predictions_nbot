@@ -26,11 +26,22 @@ type Settings struct {
 	Esplora   string `envconfig:"ESPLORA" default:"https://blockstream.info/api"`
 }
 
+const (
+	PREFIX_OTS   = "data/time-"
+	SUFFIX_OTS   = ".ots"
+	PREFIX_RELAY = "data/relay-"
+	SUFFIX_RELAY = ".txt"
+	PREFIX_EVENT = "data/event-"
+	SUFFIX_EVENT = ".json"
+)
+
 func main() {
 	if err := envconfig.Process("", &s); err != nil {
 		log.Fatalf("failed to read from env: %s", err)
 		return
 	}
+
+	os.Mkdir("data", 0755)
 
 	ctx := context.Background()
 	pool := nostr.NewSimplePool(ctx)
@@ -42,8 +53,9 @@ func main() {
 			panic(err)
 		}
 
+		time.Sleep(5 * time.Second)
+
 		for {
-			time.Sleep(time.Hour)
 			files, err := os.ReadDir(".")
 			if err != nil {
 				fmt.Println("error reading directory:", err)
@@ -80,9 +92,14 @@ func main() {
 			}
 
 			for _, file := range files {
-				if strings.HasPrefix(file.Name(), "predictions_nbot-") && strings.HasSuffix(file.Name(), ".ots") {
+				if strings.HasPrefix(file.Name(), PREFIX_OTS) && strings.HasSuffix(file.Name(), SUFFIX_OTS) {
 					filename := file.Name()
-					id := filename[len("predictions_nbot-") : len(filename)-len(".ots")]
+					id := filename[len(PREFIX_OTS) : len(filename)-len(SUFFIX_OTS)]
+					if len(id) != 64 {
+						fmt.Println("id is invalid:", id)
+						continue
+					}
+
 					fmt.Println("trying to upgrade " + id)
 
 					// read ots from file
@@ -99,7 +116,7 @@ func main() {
 
 					// read event from file
 					var event nostr.Event
-					if eventb, err := os.ReadFile("event-" + id + ".json"); err != nil {
+					if eventb, err := os.ReadFile(PREFIX_EVENT + id + SUFFIX_EVENT); err != nil {
 						fmt.Println("  error reading event:", err)
 						continue
 					} else if err := json.Unmarshal(eventb, &event); err != nil {
@@ -109,8 +126,9 @@ func main() {
 
 					// read event relays from file
 					eventRelay := ""
-					if relayb, err := os.ReadFile("relay-" + id + ".txt"); err != nil {
+					if relayb, err := os.ReadFile(PREFIX_RELAY + id + SUFFIX_RELAY); err != nil {
 						fmt.Println("  error reading event relays:", err)
+						continue
 					} else {
 						eventRelay = strings.TrimSpace(string(relayb))
 					}
@@ -137,6 +155,7 @@ func main() {
 								nostr.Tag{"block", blockHeight, blockHash},
 							},
 						}
+
 						fmt.Println("  publishing", event)
 						relay, err := pool.EnsureRelay(eventRelay)
 						if err != nil {
@@ -144,13 +163,27 @@ func main() {
 							continue
 						}
 
+						if err := event.Sign(s.SecretKey); err != nil {
+							panic(fmt.Errorf("  failed to sign: %w", err))
+						}
+
 						ictx, cancel = context.WithTimeout(ctx, time.Minute)
-						relay.Publish(ictx, event)
+						status, err := relay.Publish(ictx, event)
 						cancel()
+
+						if err == nil && status == nostr.PublishStatusSucceeded {
+							fmt.Println("  published to", relay.URL)
+							os.Remove(PREFIX_OTS + id + SUFFIX_OTS)
+							os.Remove(PREFIX_RELAY + id + SUFFIX_RELAY)
+							os.Remove(PREFIX_EVENT + id + SUFFIX_EVENT)
+						}
+
 						break
 					}
 				}
 			}
+
+			time.Sleep(time.Hour)
 		}
 	}()
 
@@ -171,13 +204,18 @@ func main() {
 		for event := range events {
 			fmt.Println("stamping event", event.Event)
 
-			// saving event and relay file
-			if err := os.WriteFile("event-"+event.ID+".json", []byte(event.String()), 0644); err != nil {
-				fmt.Println("failed to save event file", event.ID, "->", err)
+			if _, err := os.Stat(PREFIX_OTS + event.ID + SUFFIX_OTS); err == nil {
+				fmt.Println("  stamp file already exists")
 				continue
 			}
-			if err := os.WriteFile("relay-"+event.ID+".txt", []byte(event.Relay.URL), 0644); err != nil {
-				fmt.Println("failed to save event relay file", event.ID, "->", err)
+
+			// saving event and relay file
+			if err := os.WriteFile(PREFIX_EVENT+event.ID+SUFFIX_EVENT, []byte(event.String()), 0644); err != nil {
+				fmt.Println("  failed to save event file", event.ID, "->", err)
+				continue
+			}
+			if err := os.WriteFile(PREFIX_RELAY+event.ID+SUFFIX_RELAY, []byte(event.Relay.URL), 0644); err != nil {
+				fmt.Println("  failed to save event relay file", event.ID, "->", err)
 				continue
 			}
 
@@ -192,15 +230,15 @@ func main() {
 			}
 
 			file := opentimestamps.File{Digest: id, Sequences: []opentimestamps.Sequence{seq}}
-			if err := os.WriteFile("predictions_nbot-"+event.ID+".ots", file.SerializeToFile(), 0644); err != nil {
-				fmt.Println("failed to save stamp file", event.ID, "->", err)
+			if err := os.WriteFile(PREFIX_OTS+event.ID+SUFFIX_OTS, file.SerializeToFile(), 0644); err != nil {
+				fmt.Println("  failed to save stamp file", event.ID, "->", err)
 				continue
 			}
 
-			fmt.Println(" saved stamp file", event.ID)
+			fmt.Println("  saved stamp file", event.ID)
 		}
 
-		fmt.Println("lost connection to all relays, will start again after 5 minutes")
+		fmt.Println("### lost connection to all relays, will start again after 5 minutes")
 		time.Sleep(5 * time.Minute)
 	}
 }
