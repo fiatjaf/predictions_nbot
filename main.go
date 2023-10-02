@@ -21,17 +21,18 @@ import (
 var s Settings
 
 type Settings struct {
-	SecretKey string `envconfig:"SECRET_KEY"`
+	SecretKey string `envconfig:"SECRET_KEY" required:"true"`
 	Calendar  string `envconfig:"CALENDAR" default:"https://alice.btc.calendar.opentimestamps.org/"`
 	Esplora   string `envconfig:"ESPLORA" default:"https://blockstream.info/api"`
 }
 
 const (
-	PREFIX_OTS   = "data/time-"
+	FILES_SUBDIR = "data/"
+	PREFIX_OTS   = "time-"
 	SUFFIX_OTS   = ".ots"
-	PREFIX_RELAY = "data/relay-"
+	PREFIX_RELAY = "relay-"
 	SUFFIX_RELAY = ".txt"
-	PREFIX_EVENT = "data/event-"
+	PREFIX_EVENT = "event-"
 	SUFFIX_EVENT = ".json"
 )
 
@@ -48,7 +49,7 @@ func main() {
 
 	// every hour, try to upgrade our pending attestations
 	go func() {
-		_, err := os.ReadDir(".")
+		_, err := os.ReadDir(FILES_SUBDIR)
 		if err != nil {
 			panic(err)
 		}
@@ -56,7 +57,9 @@ func main() {
 		time.Sleep(5 * time.Second)
 
 		for {
-			files, err := os.ReadDir(".")
+			fmt.Println("trying to publish events for finalized timestamps")
+
+			files, err := os.ReadDir(FILES_SUBDIR)
 			if err != nil {
 				fmt.Println("error reading directory:", err)
 				continue
@@ -92,42 +95,42 @@ func main() {
 			}
 
 			for _, file := range files {
-				if strings.HasPrefix(file.Name(), PREFIX_OTS) && strings.HasSuffix(file.Name(), SUFFIX_OTS) {
-					filename := file.Name()
+				filename := file.Name()
+				fmt.Println("trying file", filename, strings.HasPrefix(filename, PREFIX_OTS), PREFIX_OTS, strings.HasSuffix(filename, SUFFIX_OTS))
+				if strings.HasPrefix(filename, PREFIX_OTS) && strings.HasSuffix(filename, SUFFIX_OTS) {
 					id := filename[len(PREFIX_OTS) : len(filename)-len(SUFFIX_OTS)]
 					if len(id) != 64 {
-						fmt.Println("id is invalid:", id)
+						fmt.Println("  id is invalid:", id)
 						continue
 					}
-
-					fmt.Println("trying to upgrade " + id)
+					fmt.Println("  trying to upgrade " + id)
 
 					// read ots from file
-					data, err := os.ReadFile(file.Name())
+					data, err := os.ReadFile(FILES_SUBDIR + PREFIX_OTS + id + SUFFIX_OTS)
 					if err != nil {
-						fmt.Println("  error reading:", err)
+						fmt.Println("    error reading:", err)
 						continue
 					}
 					ots, err := opentimestamps.ReadFromFile(data)
 					if err != nil {
-						fmt.Println("  error parsing:", err)
+						fmt.Println("    error parsing:", err)
 						continue
 					}
 
 					// read event from file
 					var event nostr.Event
-					if eventb, err := os.ReadFile(PREFIX_EVENT + id + SUFFIX_EVENT); err != nil {
-						fmt.Println("  error reading event:", err)
+					if eventb, err := os.ReadFile(FILES_SUBDIR + PREFIX_EVENT + id + SUFFIX_EVENT); err != nil {
+						fmt.Println("    error reading event:", err)
 						continue
 					} else if err := json.Unmarshal(eventb, &event); err != nil {
-						fmt.Println("  error parsing event:", err)
+						fmt.Println("    error parsing event:", err)
 						continue
 					}
 
 					// read event relays from file
 					eventRelay := ""
-					if relayb, err := os.ReadFile(PREFIX_RELAY + id + SUFFIX_RELAY); err != nil {
-						fmt.Println("  error reading event relays:", err)
+					if relayb, err := os.ReadFile(FILES_SUBDIR + PREFIX_RELAY + id + SUFFIX_RELAY); err != nil {
+						fmt.Println("    error reading event relays:", err)
 						continue
 					} else {
 						eventRelay = strings.TrimSpace(string(relayb))
@@ -139,10 +142,10 @@ func main() {
 						newSeq, err := seq.Upgrade(ictx, ots.Digest)
 						cancel()
 						if err != nil {
-							fmt.Println("  failed:", err)
+							fmt.Println("    failed:", err)
 							continue
 						}
-						fmt.Println("  upgraded", newSeq[len(newSeq)-1].Attestation.BitcoinBlockHeight)
+						fmt.Println("    upgraded", newSeq[len(newSeq)-1].Attestation.BitcoinBlockHeight)
 
 						file := opentimestamps.File{Digest: ots.Digest, Sequences: []opentimestamps.Sequence{newSeq}}
 						event := nostr.Event{
@@ -156,26 +159,27 @@ func main() {
 							},
 						}
 
-						fmt.Println("  publishing", event)
 						relay, err := pool.EnsureRelay(eventRelay)
 						if err != nil {
-							fmt.Println("  failed to get relay", eventRelay)
+							fmt.Println("    failed to get relay", eventRelay)
 							continue
 						}
 
 						if err := event.Sign(s.SecretKey); err != nil {
-							panic(fmt.Errorf("  failed to sign: %w", err))
+							panic(fmt.Errorf("    failed to sign: %w", err))
 						}
+
+						fmt.Println("    publishing", event)
 
 						ictx, cancel = context.WithTimeout(ctx, time.Minute)
 						status, err := relay.Publish(ictx, event)
 						cancel()
 
 						if err == nil && status == nostr.PublishStatusSucceeded {
-							fmt.Println("  published to", relay.URL)
-							os.Remove(PREFIX_OTS + id + SUFFIX_OTS)
-							os.Remove(PREFIX_RELAY + id + SUFFIX_RELAY)
-							os.Remove(PREFIX_EVENT + id + SUFFIX_EVENT)
+							fmt.Println("    published to", relay.URL)
+							os.Remove(FILES_SUBDIR + PREFIX_OTS + id + SUFFIX_OTS)
+							os.Remove(FILES_SUBDIR + PREFIX_RELAY + id + SUFFIX_RELAY)
+							os.Remove(FILES_SUBDIR + PREFIX_EVENT + id + SUFFIX_EVENT)
 						}
 
 						break
@@ -210,11 +214,11 @@ func main() {
 			}
 
 			// saving event and relay file
-			if err := os.WriteFile(PREFIX_EVENT+event.ID+SUFFIX_EVENT, []byte(event.String()), 0644); err != nil {
+			if err := os.WriteFile(FILES_SUBDIR+PREFIX_EVENT+event.ID+SUFFIX_EVENT, []byte(event.String()), 0644); err != nil {
 				fmt.Println("  failed to save event file", event.ID, "->", err)
 				continue
 			}
-			if err := os.WriteFile(PREFIX_RELAY+event.ID+SUFFIX_RELAY, []byte(event.Relay.URL), 0644); err != nil {
+			if err := os.WriteFile(FILES_SUBDIR+PREFIX_RELAY+event.ID+SUFFIX_RELAY, []byte(event.Relay.URL), 0644); err != nil {
 				fmt.Println("  failed to save event relay file", event.ID, "->", err)
 				continue
 			}
@@ -230,7 +234,7 @@ func main() {
 			}
 
 			file := opentimestamps.File{Digest: id, Sequences: []opentimestamps.Sequence{seq}}
-			if err := os.WriteFile(PREFIX_OTS+event.ID+SUFFIX_OTS, file.SerializeToFile(), 0644); err != nil {
+			if err := os.WriteFile(FILES_SUBDIR+PREFIX_OTS+event.ID+SUFFIX_OTS, file.SerializeToFile(), 0644); err != nil {
 				fmt.Println("  failed to save stamp file", event.ID, "->", err)
 				continue
 			}
