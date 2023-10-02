@@ -6,7 +6,7 @@ toolchain go1.21.0
 
 require (
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/nbd-wtf/go-nostr v0.23.0
+	github.com/nbd-wtf/go-nostr v0.23.1
 	github.com/nbd-wtf/opentimestamps v0.2.1
 )
 
@@ -38,5 +38,3 @@ require (
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/sys v0.12.0 // indirect
 )
-
-replace github.com/nbd-wtf/go-nostr => /home/fiatjaf/comp/go-nostr
