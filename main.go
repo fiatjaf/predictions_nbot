@@ -139,13 +139,13 @@ func main() {
 					// try to upgrade now
 					for _, seq := range ots.Sequences {
 						ictx, cancel := context.WithTimeout(ctx, time.Minute)
-						newSeq, err := seq.Upgrade(ictx, ots.Digest)
+						newSeq, err := opentimestamps.UpgradeSequence(ictx, seq, ots.Digest)
 						cancel()
 						if err != nil {
 							fmt.Println("    failed:", err)
 							continue
 						}
-						fmt.Println("    upgraded", newSeq[len(newSeq)-1].Attestation.BitcoinBlockHeight)
+						fmt.Println("    upgraded", newSeq.GetAttestation().BitcoinBlockHeight)
 
 						file := opentimestamps.File{Digest: ots.Digest, Sequences: []opentimestamps.Sequence{newSeq}}
 						event := nostr.Event{

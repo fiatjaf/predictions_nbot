@@ -7,7 +7,7 @@ toolchain go1.21.0
 require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/nbd-wtf/go-nostr v0.23.1
-	github.com/nbd-wtf/opentimestamps v0.2.1
+	github.com/nbd-wtf/opentimestamps v0.3.0
 )
 
 require (
