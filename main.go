@@ -96,7 +96,6 @@ func main() {
 
 			for _, file := range files {
 				filename := file.Name()
-				fmt.Println("trying file", filename, strings.HasPrefix(filename, PREFIX_OTS), PREFIX_OTS, strings.HasSuffix(filename, SUFFIX_OTS))
 				if strings.HasPrefix(filename, PREFIX_OTS) && strings.HasSuffix(filename, SUFFIX_OTS) {
 					id := filename[len(PREFIX_OTS) : len(filename)-len(SUFFIX_OTS)]
 					if len(id) != 64 {
@@ -208,7 +207,7 @@ func main() {
 		for event := range events {
 			fmt.Println("stamping event", event.Event)
 
-			if _, err := os.Stat(PREFIX_OTS + event.ID + SUFFIX_OTS); err == nil {
+			if _, err := os.Stat(FILES_SUBDIR + PREFIX_OTS + event.ID + SUFFIX_OTS); err == nil {
 				fmt.Println("  stamp file already exists")
 				continue
 			}
